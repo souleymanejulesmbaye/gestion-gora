@@ -89,9 +89,10 @@ with st.sidebar:
             n, g = st.text_input("Nom"), st.text_input("Équipe")
             hn, hs = st.number_input("Tarif HN", 0), st.number_input("Tarif HS", 0)
             if st.form_submit_button("Ajouter"):
-                df = charger_df('ouvriers.csv')
-                sauvegarder_df(pd.concat([df, pd.DataFrame([[n, g, hn, hs]], columns=df.columns)]), 'ouvriers.csv')
-                st.rerun()
+                if n and g:
+                    df = charger_df('ouvriers.csv')
+                    sauvegarder_df(pd.concat([df, pd.DataFrame([[n.strip(), g.strip(), hn, hs]], columns=df.columns)], ignore_index=True), 'ouvriers.csv')
+                    st.rerun()
     with t2:
         df_o = charger_df('ouvriers.csv')
         if not df_o.empty:
@@ -101,7 +102,7 @@ with st.sidebar:
                 if st.form_submit_button("Valider"):
                     df = charger_df('acomptes.csv')
                     new_a = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), nom_a, mont_a]], columns=df.columns)
-                    sauvegarder_df(pd.concat([df, new_a]), 'acomptes.csv')
+                    sauvegarder_df(pd.concat([df, new_a], ignore_index=True), 'acomptes.csv')
                     st.success("Acompte enregistré")
 
 # --- GRILLE DE POINTAGE ---
@@ -122,20 +123,21 @@ if not df_ouvriers.empty:
     
     if not df_pointage.empty:
         df_p = df_pointage.copy()
-        df_p['Date'] = pd.to_datetime(df_p['Date']).dt.strftime("%Y-%m-%d")
+        df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce').dt.strftime("%Y-%m-%d")
         for _, r in df_p[df_p['Nom'].isin(noms_f)].iterrows():
             if r['Date'] in grille.columns:
                 grille.at[r['Nom'], r['Date']] = r['Heures']
 
-    # On renomme les colonnes pour l'affichage mais on garde les dates réelles pour le calcul
-    grille.columns = affichage_jours
+    # On renomme les colonnes pour l'affichage
+    grille_visuelle = grille.copy()
+    grille_visuelle.columns = affichage_jours
     st.subheader("📝 Saisie des heures")
-    edits = st.data_editor(grille, use_container_width=True)
+    edits = st.data_editor(grille_visuelle, use_container_width=True)
 
     if st.button("💾 ENREGISTRER LE POINTAGE", type="primary"):
         df_base = charger_df('pointage.csv')
-        df_base['Date'] = pd.to_datetime(df_base['Date'])
-        # Nettoyage de la période pour ces ouvriers
+        df_base['Date'] = pd.to_datetime(df_base['Date'], errors='coerce')
+        # Nettoyage de la période
         df_base = df_base[~((df_base['Date'] >= date_debut) & (df_base['Date'] <= date_fin) & (df_base['Nom'].isin(noms_f)))]
         
         nouveaux = []
@@ -145,8 +147,9 @@ if not df_ouvriers.empty:
                     d_reelle = liste_dates[i]
                     nouveaux.append({'Date': d_reelle.strftime("%Y-%m-%d"), 'Semaine': d_reelle.isocalendar()[1], 'Nom': nom, 'Heures': h})
         
-        sauvegarder_df(pd.concat([df_base, pd.DataFrame(nouveaux)]), 'pointage.csv')
+        sauvegarder_df(pd.concat([df_base, pd.DataFrame(nouveaux)], ignore_index=True), 'pointage.csv')
         st.toast("Données sauvegardées !", icon="✅")
+        st.rerun()
 
 # --- BILAN DES SALAIRES ---
 st.divider()
@@ -154,27 +157,27 @@ st.header("📊 Bilan du Mois Comptable")
 
 if not df_pointage.empty and not df_ouvriers.empty:
     df_c = charger_df('pointage.csv')
-    df_c['Date'] = pd.to_datetime(df_c['Date'])
+    df_c['Date'] = pd.to_datetime(df_c['Date'], errors='coerce')
     df_c = df_c[(df_c['Date'] >= date_debut) & (df_c['Date'] <= date_fin)]
     
     if not df_c.empty:
         df_c = df_c.merge(df_ouvriers, left_on='Nom', right_on='nom')
-        # Calcul simplifié
-        df_c['Total'] = df_c['Heures'] * df_c['tarif_hn']
-        bilan = df_c.groupby(['groupe', 'Nom']).agg({'Heures':'sum', 'Total':'sum'}).reset_index()
+        df_c['Total_Brut'] = df_c['Heures'] * df_c['tarif_hn']
+        bilan = df_c.groupby(['groupe', 'Nom']).agg({'Heures':'sum', 'Total_Brut':'sum'}).reset_index()
         
         # Acomptes
         df_ac = charger_df('acomptes.csv')
-        df_ac['Date'] = pd.to_datetime(df_ac['Date'])
+        df_ac['Date'] = pd.to_datetime(df_ac['Date'], errors='coerce')
         ac_mois = df_ac[(df_ac['Date'] >= date_debut) & (df_ac['Date'] <= date_fin)].groupby('Nom')['Montant'].sum()
         
-        bilan['Acomptes'] = bilan['Nom'].map(ac_sum).fillna(0) if not ac_mois.empty else 0
-        bilan['Net'] = bilan['Total'] - bilan['Acomptes']
+        bilan['Acomptes'] = bilan['Nom'].map(ac_mois).fillna(0)
+        bilan['Net_a_Payer'] = bilan['Total_Brut'] - bilan['Acomptes']
         
-        st.dataframe(bilan, use_container_width=True)
+        # Affichage formaté
+        st.dataframe(bilan.style.format({'Total_Brut': '{:.0f}', 'Acomptes': '{:.0f}', 'Net_a_Payer': '{:.0f}'}), use_container_width=True)
         
         # Bouton Export
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             bilan.to_excel(writer, index=False)
-        st.download_button("📥 Télécharger le Bilan Excel", buffer, f"Bilan_{mois_noms[mois_c-1]}.xlsx")
+        st.download_button("📥 Télécharger le Bilan Excel", buffer.getvalue(), f"Bilan_Gora_Mbaye_{mois_noms[mois_c-1]}.xlsx")
