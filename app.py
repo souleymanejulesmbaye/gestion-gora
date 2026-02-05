@@ -26,7 +26,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- INITIALISATION DES FICHIERS ---
+# --- INITIALISATION ET CHARGEMENT ---
 def initialiser_fichiers():
     fichiers = {
         'ouvriers.csv': ['nom', 'fonction', 'groupe', 'tarif_hn', 'tarif_hs'],
@@ -39,7 +39,10 @@ def initialiser_fichiers():
 
 def charger_df(f): 
     if not os.path.exists(f): return pd.DataFrame()
-    return pd.read_csv(f, sep=';', encoding='utf-8-sig')
+    try:
+        return pd.read_csv(f, sep=';', encoding='utf-8-sig')
+    except:
+        return pd.DataFrame()
 
 def sauvegarder_df(df, f): 
     df.to_csv(f, index=False, sep=';', encoding='utf-8-sig')
@@ -141,16 +144,18 @@ if not df_ouvriers.empty:
     ouvriers_groupe = df_ouvriers[df_ouvriers['groupe'] == choix_g]['nom'].tolist()
     jours = pd.date_range(date_debut, date_fin)
     
-    # Création grille vide
     grille = pd.DataFrame(0, index=ouvriers_groupe, columns=[d.strftime("%Y-%m-%d") for d in jours])
     
-    # Remplir avec l'existant
     if not df_pointage.empty:
+        # CORRECTION ICI : errors='coerce' pour éviter le plantage
         df_p = df_pointage.copy()
-        df_p['Date'] = pd.to_datetime(df_p['Date']).dt.strftime("%Y-%m-%d")
+        df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce')
+        df_p = df_p.dropna(subset=['Date']) # On supprime les lignes avec dates invalides
+        df_p['Date_Str'] = df_p['Date'].dt.strftime("%Y-%m-%d")
+        
         for _, r in df_p[df_p['Nom'].isin(ouvriers_groupe)].iterrows():
-            if r['Date'] in grille.columns:
-                grille.at[r['Nom'], r['Date']] = int(r['Heures'])
+            if r['Date_Str'] in grille.columns:
+                grille.at[r['Nom'], r['Date_Str']] = int(r['Heures'])
 
     grille_visuelle = grille.copy()
     grille_visuelle.columns = [d.strftime("%d/%m") for d in jours]
@@ -160,9 +165,9 @@ if not df_ouvriers.empty:
 
     if st.button("💾 ENREGISTRER LE POINTAGE", type="primary"):
         df_p_actuel = charger_df('pointage.csv')
-        df_p_actuel['Date'] = pd.to_datetime(df_p_actuel['Date'])
+        df_p_actuel['Date'] = pd.to_datetime(df_p_actuel['Date'], errors='coerce')
+        df_p_actuel = df_p_actuel.dropna(subset=['Date'])
         
-        # Supprimer l'ancien pour ce groupe/période
         df_p_actuel = df_p_actuel[~((df_p_actuel['Date'] >= date_debut) & (df_p_actuel['Date'] <= date_fin) & (df_p_actuel['Nom'].isin(ouvriers_groupe)))]
         
         nouveaux = []
@@ -182,8 +187,6 @@ if not df_ouvriers.empty:
             sauvegarder_df(df_final, 'pointage.csv')
             st.success(f"Pointage {choix_g} enregistré !")
             st.rerun()
-        else:
-            st.warning("Aucune heure saisie.")
 
 # --- BILAN ---
 st.divider()
@@ -191,14 +194,14 @@ st.header("📊 BILAN DES PAIES")
 
 df_p_bilan = charger_df('pointage.csv')
 if not df_p_bilan.empty and not df_ouvriers.empty:
-    df_p_bilan['Date'] = pd.to_datetime(df_p_bilan['Date'])
+    df_p_bilan['Date'] = pd.to_datetime(df_p_bilan['Date'], errors='coerce')
+    df_p_bilan = df_p_bilan.dropna(subset=['Date'])
     df_p_bilan = df_p_bilan[(df_p_bilan['Date'] >= date_debut) & (df_p_bilan['Date'] <= date_fin)]
     
     if not df_p_bilan.empty:
         df_bilan = df_p_bilan.merge(df_ouvriers, left_on='Nom', right_on='nom')
-        
-        # Calcul HN/HS
         df_bilan['Cumul_Semaine'] = df_bilan.groupby(['Nom', 'Semaine'])['Heures'].transform('cumsum')
+        
         def split_h(r):
             prev = r['Cumul_Semaine'] - r['Heures']
             if prev >= 48: return 0, r['Heures']
@@ -208,9 +211,8 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
         df_bilan[['HN', 'HS']] = df_bilan.apply(lambda x: pd.Series(split_h(x)), axis=1)
         df_bilan['Brut'] = (df_bilan['HN'] * df_bilan['tarif_hn']) + (df_bilan['HS'] * df_bilan['tarif_hs'])
         
-        # Acomptes
         df_ac = charger_df('acomptes.csv')
-        df_ac['Date'] = pd.to_datetime(df_ac['Date'])
+        df_ac['Date'] = pd.to_datetime(df_ac['Date'], errors='coerce')
         ac_val = df_ac[(df_ac['Date'] >= date_debut) & (df_ac['Date'] <= date_fin)].groupby('Nom')['Montant'].sum()
 
         recap = df_bilan.groupby(['groupe', 'Nom', 'fonction']).agg({'HN':'sum', 'HS':'sum', 'Brut':'sum'}).reset_index()
@@ -221,18 +223,13 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
         for g in sorted(recap['groupe'].unique()):
             st.markdown(f'<div class="group-header">🏢 GROUPE : {g}</div>', unsafe_allow_html=True)
             df_g = recap[recap['groupe'] == g]
-            
-            # Individuel
             st.table(df_g.drop(columns='groupe').assign(
                 HN=df_g['HN'].astype(int), HS=df_g['HS'].astype(int),
                 Brut=df_g['Brut'].astype(int).map('{:,}'.format).str.replace(',', ' '),
                 Net=df_g['Net'].astype(int).map('{:,}'.format).str.replace(',', ' ')
             ))
-            
-            # Fonctions
             st.markdown('<div class="function-sub">Cumul par Métier</div>', unsafe_allow_html=True)
             st.table(df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index().astype(int))
-            
             total_g = df_g['Net'].sum()
             st.write(f"**Total Net {g} : {int(total_g):,} FCFA**".replace(',', ' '))
             total_global += total_g
