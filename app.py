@@ -139,31 +139,56 @@ if not df_ouvriers.empty:
     noms_f = df_ouvriers[df_ouvriers['groupe'] == choix_g]['nom'].tolist()
     liste_dates = pd.date_range(date_debut, date_fin)
     
+    # Préparation de la grille avec les données existantes
     grille = pd.DataFrame(0.0, index=noms_f, columns=[d.strftime("%Y-%m-%d") for d in liste_dates])
     if not df_pointage.empty:
         df_p = df_pointage.copy()
         df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce').dt.strftime("%Y-%m-%d")
         for _, r in df_p[df_p['Nom'].isin(noms_f)].iterrows():
-            if r['Date'] in grille.columns: grille.at[r['Nom'], r['Date']] = r['Heures']
+            if r['Date'] in grille.columns:
+                try: grille.at[r['Nom'], r['Date']] = float(r['Heures'])
+                except: pass
 
     grille_visuelle = grille.copy()
     grille_visuelle.columns = [d.strftime("%d/%m") for d in liste_dates]
-    st.subheader(f"📝 Pointage : {choix_g}")
-    edits = st.data_editor(grille_visuelle, use_container_width=True)
+    st.subheader(f"📝 Saisie du Pointage : {choix_g}")
+    edits = st.data_editor(grille_visuelle, use_container_width=True, key="editor_pointage")
 
     if st.button("💾 ENREGISTRER LE POINTAGE", type="primary"):
-        df_base = charger_df('pointage.csv')
-        df_base['Date'] = pd.to_datetime(df_base['Date'], errors='coerce')
-        df_base = df_base[~((df_base['Date'] >= date_debut) & (df_base['Date'] <= date_fin) & (df_base['Nom'].isin(noms_f)))]
-        nouveaux = []
-        for nom in edits.index:
-            for i, h in enumerate(edits.loc[nom]):
-                if h > 0:
-                    d_reelle = liste_dates[i]
-                    nouveaux.append({'Date': d_reelle.strftime("%Y-%m-%d"), 'Semaine': d_reelle.isocalendar()[1], 'Nom': nom, 'Heures': int(h)})
-        sauvegarder_df(pd.concat([df_base, pd.DataFrame(nouveaux)], ignore_index=True), 'pointage.csv')
-        st.toast("Enregistré !")
-        st.rerun()
+        try:
+            df_base = charger_df('pointage.csv')
+            df_base['Date'] = pd.to_datetime(df_base['Date'], errors='coerce')
+            
+            # 1. On retire les anciens pointages de cette équipe sur cette période
+            df_base = df_base[~((df_base['Date'] >= date_debut) & (df_base['Date'] <= date_fin) & (df_base['Nom'].isin(noms_f)))]
+            
+            # 2. On prépare les nouvelles lignes
+            nouveaux = []
+            for nom in edits.index:
+                for i, h in enumerate(edits.loc[nom]):
+                    # On vérifie que c'est bien un nombre et > 0
+                    try:
+                        val_h = float(h)
+                        if val_h > 0:
+                            d_reelle = liste_dates[i]
+                            nouveaux.append({
+                                'Date': d_reelle.strftime("%Y-%m-%d"), 
+                                'Semaine': int(d_reelle.isocalendar()[1]), 
+                                'Nom': nom, 
+                                'Heures': int(val_h)
+                            })
+                    except: continue
+            
+            # 3. Sauvegarde
+            if nouveaux:
+                df_final = pd.concat([df_base, pd.DataFrame(nouveaux)], ignore_index=True)
+                sauvegarder_df(df_final, 'pointage.csv')
+                st.success(f"✅ Pointage de l'équipe {choix_g} enregistré avec succès !")
+                st.rerun()
+            else:
+                st.warning("⚠️ Aucune heure n'a été saisie.")
+        except Exception as e:
+            st.error(f"Erreur lors de l'enregistrement : {e}")
 
 # --- BILAN FINAL ---
 st.divider()
@@ -177,6 +202,7 @@ if not df_pointage.empty and not df_ouvriers.empty:
     if not df_c.empty:
         df_c = df_c.merge(df_ouvriers, left_on='Nom', right_on='nom')
         df_c['Cumul_Semaine'] = df_c.groupby(['Nom', 'Semaine'])['Heures'].transform('cumsum')
+        
         def calcul_hn_hs(row):
             prec = row['Cumul_Semaine'] - row['Heures']
             if prec >= 48: return 0, row['Heures']
@@ -199,7 +225,6 @@ if not df_pointage.empty and not df_ouvriers.empty:
             st.markdown(f'<div class="group-header">🏢 GROUPE : {g}</div>', unsafe_allow_html=True)
             df_g = bilan[bilan['groupe'] == g]
             
-            # TABLEAU 1 : DÉTAIL PAR OUVRIER (Avec Net)
             st.markdown('<div class="function-sub">Détail du Personnel</div>', unsafe_allow_html=True)
             st.table(df_g.drop(columns='groupe').assign(
                 HN=df_g['HN'].astype(int), 
@@ -209,7 +234,6 @@ if not df_pointage.empty and not df_ouvriers.empty:
                 Net=df_g['Net'].astype(int).map('{:,}'.format).str.replace(',', ' ')
             ))
 
-            # TABLEAU 2 : RÉSUMÉ PAR FONCTION (Uniquement Heures)
             st.markdown('<div class="function-sub">Cumul Heures par Métier</div>', unsafe_allow_html=True)
             bilan_f = df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index()
             st.table(bilan_f.assign(HN=bilan_f['HN'].astype(int), HS=bilan_f['HS'].astype(int)))
@@ -225,3 +249,5 @@ if not df_pointage.empty and not df_ouvriers.empty:
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             bilan.to_excel(writer, index=False)
         st.download_button("📥 EXPORTER EXCEL", buffer.getvalue(), f"Bilan_Gora_{mois_noms[mois_c-1]}.xlsx")
+else:
+    st.info("Sélectionnez un groupe et saisissez des heures pour voir le bilan.")
