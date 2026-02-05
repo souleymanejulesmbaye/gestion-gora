@@ -148,7 +148,7 @@ if not df_ouvriers.empty:
 
 # --- BILAN DÉTAILLÉ PAR GROUPE & FONCTION ---
 st.divider()
-st.header("📊 BILAN GLOBAL PAR GROUPE ET PAR MÉTIER")
+st.header("📊 BILAN GLOBAL ")
 
 if not df_pointage.empty and not df_ouvriers.empty:
     df_c = charger_df('pointage.csv')
@@ -218,3 +218,4 @@ if not df_pointage.empty and not df_ouvriers.empty:
         st.download_button("📥 EXPORTER LE BILAN EXCEL COMPLET", buffer.getvalue(), f"Paie_Gora_Mbaye_{mois_noms[mois_c-1]}.xlsx")
 else:
     st.warning("Aucune donnée de pointage pour cette période.")
+
