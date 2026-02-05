@@ -4,7 +4,48 @@ import calendar
 from datetime import datetime
 import os
 import io
+# --- SYSTÈME DE CONNEXION ---
+def verifier_connexion():
+    """Gère l'affichage de l'interface de connexion"""
+    if "authentifie" not in st.session_state:
+        st.session_state["authentifie"] = False
 
+    if not st.session_state["authentifie"]:
+        st.markdown("""
+            <style>
+            .login-box {
+                background-color: white;
+                padding: 2rem;
+                border-radius: 10px;
+                border: 2px solid #1E3A8A;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            </style>
+            """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            st.markdown('<div class="login-box">', unsafe_allow_html=True)
+            st.subheader("🔑 Accès Direction")
+            utilisateur = st.text_input("Identifiant")
+            mot_de_passe = st.text_input("Mot de passe", type="password")
+            
+            if st.button("Se connecter au système"):
+                # Vous pouvez changer 'admin' et 'GORA2026' par ce que vous voulez
+                if utilisateur == "admin" and mot_de_passe == "GORA2026":
+                    st.session_state["authentifie"] = True
+                    st.success("Connexion réussie !")
+                    st.rerun()
+                else:
+                    st.error("Identifiant ou mot de passe incorrect")
+            st.markdown('</div>', unsafe_allow_html=True)
+        return False
+    return True
+
+# --- EXÉCUTION DE LA VÉRIFICATION ---
+if not verifier_connexion():
+    st.stop()  # Arrête l'exécution ici si l'utilisateur n'est pas connecté
 # --- CONFIGURATION DU DESIGN ---
 st.set_page_config(
     page_title="ÉTABLISSEMENT GORA MBAYE - Système de Pointage",
@@ -190,4 +231,5 @@ else:
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                     bilan.to_excel(writer, index=False, sheet_name='Paie_Gora_Mbaye')
+
                 st.download_button("📥 EXPORT EXCEL", buffer, f"Paie_Ets_Gora_Mbaye_{mois_c}.xlsx")
