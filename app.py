@@ -9,7 +9,6 @@ st.set_page_config(page_title="ETS GORA MBAYE", layout="wide", page_icon="🏗�
 
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
     .main-title {
         color: #1E3A8A; font-size: 32px; font-weight: bold; text-align: center;
         padding: 10px; border: 2px solid #1E3A8A; border-radius: 10px;
@@ -66,14 +65,12 @@ if not st.session_state["auth"]:
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# --- LOGIQUE COMPTABLE ---
 def obtenir_periode(mois, annee):
     if mois == 1: debut, fin = datetime(annee, 1, 1), datetime(annee, 1, 25)
     elif mois == 12: debut, fin = datetime(annee, 11, 26), datetime(annee, 12, 31)
     else: debut, fin = datetime(annee, mois-1, 26), datetime(annee, mois, 25)
     return debut, fin
 
-# --- INTERFACE PRINCIPALE ---
 st.markdown('<div class="main-title">🏗️ GESTION ADMINISTRATIVE - ETS GORA MBAYE</div>', unsafe_allow_html=True)
 
 with st.sidebar:
@@ -110,15 +107,14 @@ with st.sidebar:
                 g_e = st.text_input("Groupe", df_edit.at[idx, 'groupe'])
                 hn_e = st.number_input("Tarif HN", value=int(df_edit.at[idx, 'tarif_hn']))
                 hs_e = st.number_input("Tarif HS", value=int(df_edit.at[idx, 'tarif_hs']))
-                c1, c2 = st.columns(2)
-                if c1.form_submit_button("💾 Sauver"):
+                if st.form_submit_button("💾 Sauver"):
                     df_edit.at[idx, 'fonction'] = f_e.strip()
                     df_edit.at[idx, 'groupe'] = g_e.strip().upper()
                     df_edit.at[idx, 'tarif_hn'] = int(hn_e)
                     df_edit.at[idx, 'tarif_hs'] = int(hs_e)
                     sauvegarder_df(df_edit, 'ouvriers.csv')
                     st.rerun()
-                if c2.form_submit_button("🗑️ Suppr."):
+                if st.form_submit_button("🗑️ Suppr."):
                     sauvegarder_df(df_edit.drop(idx), 'ouvriers.csv')
                     st.rerun()
 
@@ -160,14 +156,19 @@ if not df_ouvriers.empty:
     grille_visuelle.columns = [d.strftime("%d/%m") for d in jours]
     
     st.subheader(f"📝 Saisie : {choix_g}")
-    edits = st.data_editor(grille_visuelle, use_container_width=True)
+    edits = st.data_editor(grille_visuelle, use_container_width=True, key=f"editor_{choix_g}")
 
-    if st.button("💾 ENREGISTRER LE POINTAGE", type="primary"):
+    # BOUTON D'ENREGISTREMENT AMÉLIORÉ
+    if st.button("💾 ENREGISTRER LE POINTAGE", type="primary", use_container_width=True):
         df_p_actuel = charger_df('pointage.csv')
         df_p_actuel['Date'] = pd.to_datetime(df_p_actuel['Date'], errors='coerce')
         df_p_actuel = df_p_actuel.dropna(subset=['Date'])
         
-        df_p_actuel = df_p_actuel[~((df_p_actuel['Date'] >= date_debut) & (df_p_actuel['Date'] <= date_fin) & (df_p_actuel['Nom'].isin(ouvriers_groupe)))]
+        # Supprimer l'ancien pour ce groupe/période
+        mask = (df_p_actuel['Date'] >= pd.Timestamp(date_debut)) & \
+               (df_p_actuel['Date'] <= pd.Timestamp(date_fin)) & \
+               (df_p_actuel['Nom'].isin(ouvriers_groupe))
+        df_p_actuel = df_p_actuel[~mask]
         
         nouveaux = []
         for nom in edits.index:
@@ -181,11 +182,11 @@ if not df_ouvriers.empty:
                         'Heures': int(h)
                     })
         
-        if nouveaux:
-            df_final = pd.concat([df_p_actuel, pd.DataFrame(nouveaux)], ignore_index=True)
-            sauvegarder_df(df_final, 'pointage.csv')
-            st.success(f"Pointage {choix_g} enregistré !")
-            st.rerun()
+        df_final = pd.concat([df_p_actuel, pd.DataFrame(nouveaux)], ignore_index=True)
+        sauvegarder_df(df_final, 'pointage.csv')
+        st.cache_data.clear() # Nettoie la mémoire
+        st.success(f"✅ Pointage {choix_g} enregistré !")
+        st.rerun() # Force le rechargement immédiat
 
 # --- BILAN ---
 st.divider()
@@ -195,7 +196,7 @@ df_p_bilan = charger_df('pointage.csv')
 if not df_p_bilan.empty and not df_ouvriers.empty:
     df_p_bilan['Date'] = pd.to_datetime(df_p_bilan['Date'], errors='coerce')
     df_p_bilan = df_p_bilan.dropna(subset=['Date'])
-    df_p_bilan = df_p_bilan[(df_p_bilan['Date'] >= date_debut) & (df_p_bilan['Date'] <= date_fin)]
+    df_p_bilan = df_p_bilan[(df_p_bilan['Date'] >= pd.Timestamp(date_debut)) & (df_p_bilan['Date'] <= pd.Timestamp(date_fin))]
     
     if not df_p_bilan.empty:
         df_bilan = df_p_bilan.merge(df_ouvriers, left_on='Nom', right_on='nom')
@@ -212,7 +213,7 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
         
         df_ac = charger_df('acomptes.csv')
         df_ac['Date'] = pd.to_datetime(df_ac['Date'], errors='coerce')
-        ac_val = df_ac[(df_ac['Date'] >= date_debut) & (df_ac['Date'] <= date_fin)].groupby('Nom')['Montant'].sum()
+        ac_val = df_ac[(df_ac['Date'] >= pd.Timestamp(date_debut)) & (df_ac['Date'] <= pd.Timestamp(date_fin))].groupby('Nom')['Montant'].sum()
 
         recap = df_bilan.groupby(['groupe', 'Nom', 'fonction']).agg({'HN':'sum', 'HS':'sum', 'Brut':'sum'}).reset_index()
         recap['Acomptes'] = recap['Nom'].map(ac_val).fillna(0).astype(int)
@@ -223,14 +224,12 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
             st.markdown(f'<div class="group-header">🏢 GROUPE : {g}</div>', unsafe_allow_html=True)
             df_g = recap[recap['groupe'] == g]
             
-            # Tableau individuel
             st.table(df_g.drop(columns='groupe').assign(
                 HN=df_g['HN'].astype(int), HS=df_g['HS'].astype(int),
                 Brut=df_g['Brut'].astype(int).map('{:,}'.format).str.replace(',', ' '),
                 Net=df_g['Net'].astype(int).map('{:,}'.format).str.replace(',', ' ')
             ))
             
-            # Tableau Fonctions corrigé (on ne convertit que HN et HS en int)
             st.markdown('<div class="function-sub">Cumul par Métier</div>', unsafe_allow_html=True)
             df_f = df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index()
             df_f['HN'] = df_f['HN'].astype(int)
@@ -243,3 +242,5 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
             
         st.divider()
         st.metric("💰 TOTAL GÉNÉRAL", f"{int(total_global):,} FCFA".replace(',', ' '))
+else:
+    st.info("Aucun pointage enregistré pour ce mois.")
