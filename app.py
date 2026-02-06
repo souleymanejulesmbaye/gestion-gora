@@ -4,243 +4,153 @@ from datetime import datetime
 import os
 import io
 
-# --- CONFIGURATION ET DESIGN ---
+# --- CONFIGURATION ---
 st.set_page_config(page_title="ETS GORA MBAYE", layout="wide", page_icon="🏗️")
 
 st.markdown("""
     <style>
-    .main-title {
-        color: #1E3A8A; font-size: 32px; font-weight: bold; text-align: center;
-        padding: 10px; border: 2px solid #1E3A8A; border-radius: 10px;
-        background-color: white; margin-bottom: 20px;
-    }
-    .group-header {
-        background-color: #1E3A8A; color: white; padding: 10px;
-        border-radius: 5px; margin-top: 25px; font-weight: bold; font-size: 20px;
-    }
-    .function-sub {
-        background-color: #e9ecef; color: #1E3A8A; padding: 5px 10px;
-        border-radius: 3px; margin-top: 10px; font-weight: bold; border-left: 5px solid #1E3A8A;
-    }
+    .main-title { color: #1E3A8A; font-size: 30px; font-weight: bold; text-align: center; border: 2px solid #1E3A8A; border-radius: 10px; background: white; padding: 10px; margin-bottom: 20px; }
+    .group-header { background-color: #1E3A8A; color: white; padding: 10px; border-radius: 5px; margin-top: 20px; font-weight: bold; }
+    .function-sub { background-color: #f1f3f5; color: #1E3A8A; padding: 5px; border-radius: 3px; font-weight: bold; margin-top: 10px; border-left: 4px solid #1E3A8A; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INITIALISATION ET CHARGEMENT ---
-def initialiser_fichiers():
-    fichiers = {
-        'ouvriers.csv': ['nom', 'fonction', 'groupe', 'tarif_hn', 'tarif_hs'],
-        'pointage.csv': ['Date', 'Semaine', 'Nom', 'Heures'],
-        'acomptes.csv': ['Date', 'Nom', 'Montant']
-    }
-    for f, cols in fichiers.items():
-        if not os.path.exists(f) or os.stat(f).st_size == 0:
-            pd.DataFrame(columns=cols).to_csv(f, index=False, sep=';', encoding='utf-8-sig')
-
-def charger_df(f): 
+# --- FICHIERS ---
+def charger_df(f):
     if not os.path.exists(f): return pd.DataFrame()
-    try:
-        return pd.read_csv(f, sep=';', encoding='utf-8-sig')
-    except:
-        return pd.DataFrame()
+    return pd.read_csv(f, sep=';', encoding='utf-8-sig')
 
-def sauvegarder_df(df, f): 
+def sauvegarder_df(df, f):
     df.to_csv(f, index=False, sep=';', encoding='utf-8-sig')
 
-initialiser_fichiers()
+# Initialisation simple
+for f, cols in {'ouvriers.csv': ['nom', 'fonction', 'groupe', 'tarif_hn', 'tarif_hs'], 
+                'pointage.csv': ['Date', 'Semaine', 'Nom', 'Heures'], 
+                'acomptes.csv': ['Date', 'Nom', 'Montant']}.items():
+    if not os.path.exists(f): pd.DataFrame(columns=cols).to_csv(f, index=False, sep=';', encoding='utf-8-sig')
 
-# --- SYSTÈME DE CONNEXION ---
+# --- AUTH ---
 if "auth" not in st.session_state: st.session_state["auth"] = False
 if not st.session_state["auth"]:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown('<div style="background-color:white;padding:2rem;border-radius:10px;border:1px solid #ddd">', unsafe_allow_html=True)
-        st.subheader("🔐 Accès Direction - ETS GORA MBAYE")
-        user = st.text_input("Identifiant")
-        pwd = st.text_input("Mot de passe", type="password")
-        if st.button("Se connecter"):
-            if user == "admin" and pwd == "GORA2026":
-                st.session_state["auth"] = True
-                st.rerun()
-            else: st.error("Identifiant ou mot de passe incorrect")
-        st.markdown('</div>', unsafe_allow_html=True)
+    user = st.sidebar.text_input("Identifiant")
+    pwd = st.sidebar.text_input("Mot de passe", type="password")
+    if st.sidebar.button("Connexion"):
+        if user == "admin" and pwd == "GORA2026":
+            st.session_state["auth"] = True
+            st.rerun()
     st.stop()
 
-def obtenir_periode(mois, annee):
-    if mois == 1: debut, fin = datetime(annee, 1, 1), datetime(annee, 1, 25)
-    elif mois == 12: debut, fin = datetime(annee, 11, 26), datetime(annee, 12, 31)
-    else: debut, fin = datetime(annee, mois-1, 26), datetime(annee, mois, 25)
-    return debut, fin
+# --- DATES ---
+mois_noms = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+mois_c = st.sidebar.selectbox("Mois", range(1, 13), index=datetime.now().month-1, format_func=lambda x: mois_noms[x-1])
+annee_c = st.sidebar.number_input("Année", value=2026)
 
-st.markdown('<div class="main-title">🏗️ GESTION ADMINISTRATIVE - ETS GORA MBAYE</div>', unsafe_allow_html=True)
+def obtenir_periode(m, a):
+    if m == 1: return datetime(a, 1, 1), datetime(a, 1, 25)
+    return datetime(a, m-1, 26), datetime(a, m, 25)
 
+d_debut, d_fin = obtenir_periode(mois_c, annee_c)
+
+# --- GESTION OUVRIERS ---
 with st.sidebar:
-    st.header("⚙️ Paramètres")
-    mois_noms = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
-    mois_c = st.selectbox("Mois de Paie", range(1, 13), index=datetime.now().month-1, format_func=lambda x: mois_noms[x-1])
-    annee_c = st.number_input("Année", value=datetime.now().year)
-    date_debut, date_fin = obtenir_periode(mois_c, annee_c)
-    
     st.divider()
-    t1, t2, t3 = st.tabs(["➕ Ajouter", "✏️ Gérer", "💵 Acomptes"])
-    
-    with t1:
-        with st.form("o", clear_on_submit=True):
-            n = st.text_input("Nom & Prénom")
+    with st.expander("➕ Ajouter un ouvrier/groupe"):
+        with st.form("add_o", clear_on_submit=True):
+            n = st.text_input("Nom")
             f = st.text_input("Fonction")
-            g = st.text_input("Groupe")
+            g = st.text_input("Groupe (ex: SERVITUDE)")
             hn = st.number_input("Tarif HN", 0)
             hs = st.number_input("Tarif HS", 0)
-            if st.form_submit_button("Valider"):
-                if n and g:
-                    df = charger_df('ouvriers.csv')
-                    new_o = pd.DataFrame([[n.strip(), f.strip(), g.strip().upper(), int(hn), int(hs)]], columns=df.columns)
-                    sauvegarder_df(pd.concat([df, new_o], ignore_index=True), 'ouvriers.csv')
-                    st.rerun()
-
-    with t2:
-        df_edit = charger_df('ouvriers.csv')
-        if not df_edit.empty:
-            nom_sel = st.selectbox("Choisir l'ouvrier", df_edit['nom'].tolist())
-            idx = df_edit[df_edit['nom'] == nom_sel].index[0]
-            with st.form("edit"):
-                f_e = st.text_input("Fonction", df_edit.at[idx, 'fonction'])
-                g_e = st.text_input("Groupe", df_edit.at[idx, 'groupe'])
-                hn_e = st.number_input("Tarif HN", value=int(df_edit.at[idx, 'tarif_hn']))
-                hs_e = st.number_input("Tarif HS", value=int(df_edit.at[idx, 'tarif_hs']))
-                if st.form_submit_button("💾 Sauver"):
-                    df_edit.at[idx, 'fonction'] = f_e.strip()
-                    df_edit.at[idx, 'groupe'] = g_e.strip().upper()
-                    df_edit.at[idx, 'tarif_hn'] = int(hn_e)
-                    df_edit.at[idx, 'tarif_hs'] = int(hs_e)
-                    sauvegarder_df(df_edit, 'ouvriers.csv')
-                    st.rerun()
-                if st.form_submit_button("🗑️ Suppr."):
-                    sauvegarder_df(df_edit.drop(idx), 'ouvriers.csv')
-                    st.rerun()
-
-    with t3:
-        df_o = charger_df('ouvriers.csv')
-        if not df_o.empty:
-            nom_a = st.selectbox("Ouvrier", sorted(df_o['nom'].tolist()), key="ac")
-            mont_a = st.number_input("Montant", 0)
-            if st.button("Valider l'Acompte"):
-                df_ac = charger_df('acomptes.csv')
-                new_ac = pd.DataFrame([[datetime.now().strftime("%Y-%m-%d"), nom_a, int(mont_a)]], columns=df_ac.columns)
-                sauvegarder_df(pd.concat([df_ac, new_ac], ignore_index=True), 'acomptes.csv')
-                st.success("Enregistré")
+            if st.form_submit_button("Ajouter"):
+                df = charger_df('ouvriers.csv')
+                sauvegarder_df(pd.concat([df, pd.DataFrame([[n, f, g.upper(), hn, hs]], columns=df.columns)]), 'ouvriers.csv')
+                st.rerun()
 
 # --- POINTAGE ---
-df_ouvriers = charger_df('ouvriers.csv')
-df_pointage = charger_df('pointage.csv')
+st.markdown('<div class="main-title">GESTION DES POINTAGES - ETS GORA MBAYE</div>', unsafe_allow_html=True)
+df_o = charger_df('ouvriers.csv')
 
-if not df_ouvriers.empty:
-    liste_groupes = sorted(df_ouvriers['groupe'].unique())
-    choix_g = st.selectbox("🎯 Sélectionner le Groupe à pointer :", liste_groupes)
+if not df_o.empty:
+    grps = sorted(df_o['groupe'].unique())
+    choix_g = st.selectbox("🎯 CHOISIR LE GROUPE :", grps)
     
-    ouvriers_groupe = df_ouvriers[df_ouvriers['groupe'] == choix_g]['nom'].tolist()
-    jours = pd.date_range(date_debut, date_fin)
+    noms_g = df_o[df_o['groupe'] == choix_g]['nom'].tolist()
+    dates = pd.date_range(d_debut, d_fin)
     
-    grille = pd.DataFrame(0, index=ouvriers_groupe, columns=[d.strftime("%Y-%m-%d") for d in jours])
+    # On crée une clé unique pour le tableau basée sur le groupe et le mois
+    cle_unique = f"saisie_{choix_g}_{mois_c}"
     
-    if not df_pointage.empty:
-        df_p = df_pointage.copy()
+    grille = pd.DataFrame(0, index=noms_g, columns=[d.strftime("%Y-%m-%d") for d in dates])
+    df_p = charger_df('pointage.csv')
+    if not df_p.empty:
         df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce')
-        df_p = df_p.dropna(subset=['Date'])
-        df_p['Date_Str'] = df_p['Date'].dt.strftime("%Y-%m-%d")
-        
-        for _, r in df_p[df_p['Nom'].isin(ouvriers_groupe)].iterrows():
-            if r['Date_Str'] in grille.columns:
-                grille.at[r['Nom'], r['Date_Str']] = int(r['Heures'])
+        for _, r in df_p[df_p['Nom'].isin(noms_g)].iterrows():
+            d_str = r['Date'].strftime("%Y-%m-%d")
+            if d_str in grille.columns: grille.at[r['Nom'], d_str] = int(r['Heures'])
 
-    grille_visuelle = grille.copy()
-    grille_visuelle.columns = [d.strftime("%d/%m") for d in jours]
-    
-    st.subheader(f"📝 Saisie : {choix_g}")
-    edits = st.data_editor(grille_visuelle, use_container_width=True, key=f"editor_{choix_g}")
+    # Affichage du tableau
+    st.subheader(f"Saisie des heures : {choix_g}")
+    edits = st.data_editor(grille, use_container_width=True, key=cle_unique)
 
-    # BOUTON D'ENREGISTREMENT AMÉLIORÉ
-    if st.button("💾 ENREGISTRER LE POINTAGE", type="primary", use_container_width=True):
-        df_p_actuel = charger_df('pointage.csv')
-        df_p_actuel['Date'] = pd.to_datetime(df_p_actuel['Date'], errors='coerce')
-        df_p_actuel = df_p_actuel.dropna(subset=['Date'])
-        
-        # Supprimer l'ancien pour ce groupe/période
-        mask = (df_p_actuel['Date'] >= pd.Timestamp(date_debut)) & \
-               (df_p_actuel['Date'] <= pd.Timestamp(date_fin)) & \
-               (df_p_actuel['Nom'].isin(ouvriers_groupe))
-        df_p_actuel = df_p_actuel[~mask]
+    if st.button(f"💾 ENREGISTRER {choix_g}", type="primary"):
+        df_all = charger_df('pointage.csv')
+        df_all['Date'] = pd.to_datetime(df_all['Date'], errors='coerce')
+        # On supprime uniquement ce groupe pour ce mois
+        df_all = df_all[~((df_all['Nom'].isin(noms_g)) & (df_all['Date'] >= d_debut) & (df_all['Date'] <= d_fin))]
         
         nouveaux = []
         for nom in edits.index:
-            for i, h in enumerate(edits.loc[nom]):
-                if int(h) > 0:
-                    d_reelle = jours[i]
-                    nouveaux.append({
-                        'Date': d_reelle.strftime("%Y-%m-%d"),
-                        'Semaine': int(d_reelle.isocalendar()[1]),
-                        'Nom': nom,
-                        'Heures': int(h)
-                    })
+            for col in edits.columns:
+                h = edits.at[nom, col]
+                if h > 0:
+                    dt = pd.to_datetime(col)
+                    nouveaux.append({'Date': col, 'Semaine': dt.isocalendar()[1], 'Nom': nom, 'Heures': int(h)})
         
-        df_final = pd.concat([df_p_actuel, pd.DataFrame(nouveaux)], ignore_index=True)
-        sauvegarder_df(df_final, 'pointage.csv')
-        st.cache_data.clear() # Nettoie la mémoire
-        st.success(f"✅ Pointage {choix_g} enregistré !")
-        st.rerun() # Force le rechargement immédiat
+        if nouveaux:
+            df_final = pd.concat([df_all, pd.DataFrame(nouveaux)], ignore_index=True)
+            sauvegarder_df(df_final, 'pointage.csv')
+            st.success(f"✅ Pointage de {choix_g} enregistré !")
+            st.rerun()
 
 # --- BILAN ---
 st.divider()
-st.header("📊 BILAN DES PAIES")
-
-df_p_bilan = charger_df('pointage.csv')
-if not df_p_bilan.empty and not df_ouvriers.empty:
-    df_p_bilan['Date'] = pd.to_datetime(df_p_bilan['Date'], errors='coerce')
-    df_p_bilan = df_p_bilan.dropna(subset=['Date'])
-    df_p_bilan = df_p_bilan[(df_p_bilan['Date'] >= pd.Timestamp(date_debut)) & (df_p_bilan['Date'] <= pd.Timestamp(date_fin))]
+st.header("📊 RÉCAPITULATIF GÉNÉRAL")
+df_p_view = charger_df('pointage.csv')
+if not df_p_view.empty and not df_o.empty:
+    df_p_view['Date'] = pd.to_datetime(df_p_view['Date'], errors='coerce')
+    df_m = df_p_view[(df_p_view['Date'] >= d_debut) & (df_p_view['Date'] <= d_fin)]
     
-    if not df_p_bilan.empty:
-        df_bilan = df_p_bilan.merge(df_ouvriers, left_on='Nom', right_on='nom')
-        df_bilan['Cumul_Semaine'] = df_bilan.groupby(['Nom', 'Semaine'])['Heures'].transform('cumsum')
+    if not df_m.empty:
+        df_res = df_m.merge(df_o, left_on='Nom', right_on='nom')
+        df_res['Cumul_S'] = df_res.groupby(['Nom', 'Semaine'])['Heures'].transform('cumsum')
         
-        def split_h(r):
-            prev = r['Cumul_Semaine'] - r['Heures']
-            if prev >= 48: return 0, r['Heures']
-            if r['Cumul_Semaine'] > 48: return (48 - prev), (r['Cumul_Semaine'] - 48)
+        def calc_h(r):
+            p = r['Cumul_S'] - r['Heures']
+            if p >= 48: return 0, r['Heures']
+            if r['Cumul_S'] > 48: return (48-p), (r['Cumul_S']-48)
             return r['Heures'], 0
+            
+        df_res[['HN', 'HS']] = df_res.apply(lambda x: pd.Series(calc_h(x)), axis=1)
+        df_res['Brut'] = (df_res['HN'] * df_res['tarif_hn']) + (df_res['HS'] * df_res['tarif_hs'])
         
-        df_bilan[['HN', 'HS']] = df_bilan.apply(lambda x: pd.Series(split_h(x)), axis=1)
-        df_bilan['Brut'] = (df_bilan['HN'] * df_bilan['tarif_hn']) + (df_bilan['HS'] * df_bilan['tarif_hs'])
+        recap = df_res.groupby(['groupe', 'Nom', 'fonction']).agg({'HN':'sum', 'HS':'sum', 'Brut':'sum'}).reset_index()
         
-        df_ac = charger_df('acomptes.csv')
-        df_ac['Date'] = pd.to_datetime(df_ac['Date'], errors='coerce')
-        ac_val = df_ac[(df_ac['Date'] >= pd.Timestamp(date_debut)) & (df_ac['Date'] <= pd.Timestamp(date_fin))].groupby('Nom')['Montant'].sum()
-
-        recap = df_bilan.groupby(['groupe', 'Nom', 'fonction']).agg({'HN':'sum', 'HS':'sum', 'Brut':'sum'}).reset_index()
-        recap['Acomptes'] = recap['Nom'].map(ac_val).fillna(0).astype(int)
-        recap['Net'] = recap['Brut'] - recap['Acomptes']
-
-        total_global = 0
+        total_paye = 0
         for g in sorted(recap['groupe'].unique()):
             st.markdown(f'<div class="group-header">🏢 GROUPE : {g}</div>', unsafe_allow_html=True)
-            df_g = recap[recap['groupe'] == g]
+            dg = recap[recap['groupe'] == g]
             
-            st.table(df_g.drop(columns='groupe').assign(
-                HN=df_g['HN'].astype(int), HS=df_g['HS'].astype(int),
-                Brut=df_g['Brut'].astype(int).map('{:,}'.format).str.replace(',', ' '),
-                Net=df_g['Net'].astype(int).map('{:,}'.format).str.replace(',', ' ')
+            # Détail
+            st.table(dg.drop(columns='groupe').assign(
+                HN=dg['HN'].astype(int), HS=dg['HS'].astype(int),
+                Brut=dg['Brut'].astype(int).map('{:,}'.format).str.replace(',', ' ')
             ))
             
-            st.markdown('<div class="function-sub">Cumul par Métier</div>', unsafe_allow_html=True)
-            df_f = df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index()
-            df_f['HN'] = df_f['HN'].astype(int)
-            df_f['HS'] = df_f['HS'].astype(int)
-            st.table(df_f)
+            # Fonctions (SANS MONTANT comme demandé)
+            st.markdown('<div class="function-sub">Heures par Métier</div>', unsafe_allow_html=True)
+            df_func = dg.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index()
+            st.table(df_func.assign(HN=df_func['HN'].astype(int), HS=df_func['HS'].astype(int)))
             
-            total_g = df_g['Net'].sum()
-            st.write(f"**Total Net {g} : {int(total_g):,} FCFA**".replace(',', ' '))
-            total_global += total_g
-            
-        st.divider()
-        st.metric("💰 TOTAL GÉNÉRAL", f"{int(total_global):,} FCFA".replace(',', ' '))
-else:
-    st.info("Aucun pointage enregistré pour ce mois.")
+            total_paye += dg['Brut'].sum()
+        
+        st.metric("🏗️ TOTAL À PAYER", f"{int(total_paye):,} FCFA".replace(',', ' '))
