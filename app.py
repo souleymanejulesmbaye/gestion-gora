@@ -147,10 +147,9 @@ if not df_ouvriers.empty:
     grille = pd.DataFrame(0, index=ouvriers_groupe, columns=[d.strftime("%Y-%m-%d") for d in jours])
     
     if not df_pointage.empty:
-        # CORRECTION ICI : errors='coerce' pour éviter le plantage
         df_p = df_pointage.copy()
         df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce')
-        df_p = df_p.dropna(subset=['Date']) # On supprime les lignes avec dates invalides
+        df_p = df_p.dropna(subset=['Date'])
         df_p['Date_Str'] = df_p['Date'].dt.strftime("%Y-%m-%d")
         
         for _, r in df_p[df_p['Nom'].isin(ouvriers_groupe)].iterrows():
@@ -223,13 +222,21 @@ if not df_p_bilan.empty and not df_ouvriers.empty:
         for g in sorted(recap['groupe'].unique()):
             st.markdown(f'<div class="group-header">🏢 GROUPE : {g}</div>', unsafe_allow_html=True)
             df_g = recap[recap['groupe'] == g]
+            
+            # Tableau individuel
             st.table(df_g.drop(columns='groupe').assign(
                 HN=df_g['HN'].astype(int), HS=df_g['HS'].astype(int),
                 Brut=df_g['Brut'].astype(int).map('{:,}'.format).str.replace(',', ' '),
                 Net=df_g['Net'].astype(int).map('{:,}'.format).str.replace(',', ' ')
             ))
+            
+            # Tableau Fonctions corrigé (on ne convertit que HN et HS en int)
             st.markdown('<div class="function-sub">Cumul par Métier</div>', unsafe_allow_html=True)
-            st.table(df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index().astype(int))
+            df_f = df_g.groupby('fonction').agg({'HN':'sum', 'HS':'sum'}).reset_index()
+            df_f['HN'] = df_f['HN'].astype(int)
+            df_f['HS'] = df_f['HS'].astype(int)
+            st.table(df_f)
+            
             total_g = df_g['Net'].sum()
             st.write(f"**Total Net {g} : {int(total_g):,} FCFA**".replace(',', ' '))
             total_global += total_g
