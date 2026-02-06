@@ -14,22 +14,33 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FONCTIONS FICHIERS ---
+# --- FONCTIONS FICHIERS AVEC AUTO-RÉPARATION ---
+def initialiser_fichiers():
+    colonnes = {
+        'ouvriers.csv': ['nom', 'fonction', 'groupe', 'tarif_hn', 'tarif_hs'],
+        'pointage.csv': ['Date', 'Semaine', 'Nom', 'Heures'],
+        'acomptes.csv': ['Date', 'Nom', 'Montant']
+    }
+    for f, cols in colonnes.items():
+        if not os.path.exists(f) or os.stat(f).st_size == 0:
+            pd.DataFrame(columns=cols).to_csv(f, index=False, sep=';', encoding='utf-8-sig')
+
 def charger_df(f):
-    if not os.path.exists(f): return pd.DataFrame()
+    initialiser_fichiers()
     try:
-        return pd.read_csv(f, sep=';', encoding='utf-8-sig')
+        df = pd.read_csv(f, sep=';', encoding='utf-8-sig')
+        # Sécurité : Si le fichier est vide ou corrompu (KeyError), on renvoie un DF vide avec les bonnes colonnes
+        if f == 'pointage.csv' and 'Date' not in df.columns:
+            return pd.DataFrame(columns=['Date', 'Semaine', 'Nom', 'Heures'])
+        return df
     except:
         return pd.DataFrame()
 
 def sauvegarder_df(df, f):
     df.to_csv(f, index=False, sep=';', encoding='utf-8-sig')
 
-# Initialisation
-for f, cols in {'ouvriers.csv': ['nom', 'fonction', 'groupe', 'tarif_hn', 'tarif_hs'], 
-                'pointage.csv': ['Date', 'Semaine', 'Nom', 'Heures'], 
-                'acomptes.csv': ['Date', 'Nom', 'Montant']}.items():
-    if not os.path.exists(f): pd.DataFrame(columns=cols).to_csv(f, index=False, sep=';', encoding='utf-8-sig')
+# Lancer l'initialisation au démarrage
+initialiser_fichiers()
 
 # --- AUTHENTIFICATION ---
 if "auth" not in st.session_state: st.session_state["auth"] = False
@@ -85,23 +96,26 @@ if not df_o.empty:
     grille = pd.DataFrame(0, index=noms_g, columns=list(dict_dates.values()))
     
     df_p = charger_df('pointage.csv')
-    if not df_p.empty:
+    if not df_p.empty and 'Date' in df_p.columns:
         df_p['Date'] = pd.to_datetime(df_p['Date'], errors='coerce')
-        # On ne traite que les lignes qui ont une date valide
         df_p_valide = df_p.dropna(subset=['Date'])
         for _, r in df_p_valide[df_p_valide['Nom'].isin(noms_g)].iterrows():
             d_reel = r['Date'].strftime("%Y-%m-%d")
             if d_reel in dict_dates:
                 grille.at[r['Nom'], dict_dates[d_reel]] = int(r['Heures'])
 
-    st.subheader(f"Saisie : {choix_g} (Période du {d_debut.strftime('%d/%m')} au {d_fin.strftime('%d/%m')})")
+    st.subheader(f"Saisie : {choix_g} ({d_debut.strftime('%d/%m')} au {d_fin.strftime('%d/%m')})")
     edits = st.data_editor(grille, use_container_width=True, key=f"ed_{choix_g}_{mois_c}")
 
     if st.button(f"💾 ENREGISTRER LE POINTAGE : {choix_g}", type="primary", use_container_width=True):
         df_all = charger_df('pointage.csv')
-        df_all['Date'] = pd.to_datetime(df_all['Date'], errors='coerce')
         
-        # Nettoyage des anciennes données pour ce groupe
+        # Sécurité renforcée pour KeyError
+        if 'Date' not in df_all.columns:
+            df_all = pd.DataFrame(columns=['Date', 'Semaine', 'Nom', 'Heures'])
+        else:
+            df_all['Date'] = pd.to_datetime(df_all['Date'], errors='coerce')
+        
         mask = (df_all['Nom'].isin(noms_g)) & (df_all['Date'] >= d_debut) & (df_all['Date'] <= d_fin)
         df_all = df_all[~mask].dropna(subset=['Date'])
         
@@ -121,16 +135,15 @@ if not df_o.empty:
                         })
                 except: continue
         
-        if nouveaux:
-            df_final = pd.concat([df_all, pd.DataFrame(nouveaux)], ignore_index=True)
-            sauvegarder_df(df_final, 'pointage.csv')
-            st.success(f"✅ Enregistré pour {choix_g}")
-            st.rerun()
+        df_final = pd.concat([df_all, pd.DataFrame(nouveaux)], ignore_index=True)
+        sauvegarder_df(df_final, 'pointage.csv')
+        st.success(f"✅ Enregistré avec succès !")
+        st.rerun()
 
 # --- BILAN ---
 st.divider()
 df_p_view = charger_df('pointage.csv')
-if not df_p_view.empty and not df_o.empty:
+if not df_p_view.empty and 'Date' in df_p_view.columns and not df_o.empty:
     df_p_view['Date'] = pd.to_datetime(df_p_view['Date'], errors='coerce')
     df_m = df_p_view.dropna(subset=['Date'])
     df_m = df_m[(df_m['Date'] >= d_debut) & (df_m['Date'] <= d_fin)]
@@ -160,4 +173,4 @@ if not df_p_view.empty and not df_o.empty:
             ))
             total_paye += dg['Brut'].sum()
         
-        st.metric("🏗️ TOTAL GÉNÉRAL", f"{int(total_paye):,} FCFA".replace(',', ' '))
+        st.metric("💰 TOTAL GÉNÉRAL", f"{int(total_paye):,} FCFA".replace(',', ' '))
